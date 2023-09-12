@@ -3,6 +3,7 @@ from fastapi import FastAPI, Request, Form, Response
 from typing import Optional
 from twilio.twiml.voice_response import VoiceResponse, Gather
 from fastapi.responses import PlainTextResponse
+from twilio.rest import Client
 import json
 import uvicorn
 import openai
@@ -18,10 +19,6 @@ app = FastAPI()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
-def full_url(url):
-    return "http://95.164.44.248:8000" + url
-
-
 async def transcribe(recording_url):
     hash = str(random.getrandbits(32))
     try:
@@ -34,6 +31,22 @@ async def transcribe(recording_url):
 
     os.remove(hash + ".wav")
     return transcript
+
+
+@app.get("/make-call/{phoneNumber}")
+def make_call(request: Request, phoneNumber: str):
+    account_sid = os.getenv('TWILIO_ACCOUNT_SID')
+    auth_token = os.getenv('TWILIO_AUTH_TOKEN')
+    twilio_number = os.getenv('TWILIO_PHONE_NUMBER')
+    client = Client(account_sid, auth_token)
+
+    call = client.calls.create(
+        url=request.base_url + "greeting",
+        method="GET",
+        to=phoneNumber,
+        from_=twilio_number
+    )
+    print(call.sid)
 
 
 @app.get("/greeting")
@@ -87,12 +100,14 @@ def greeting_gather(request: Request):
         response.redirect("/finish-without-answer", method='GET')
         return Response(content=str(response), media_type="application/xml")
 
+
 @app.get("/finish-without-answer")
 def finish_without_answer(request: Request):
     response = VoiceResponse()
     response.say("Thank you. Please have a nice day.")
     response.hangup()
     return Response(content=str(response), media_type="application/xml")
+
 
 @app.get("/question/{questionIndex}")
 def question(request: Request, questionIndex: int):
@@ -104,7 +119,7 @@ def question(request: Request, questionIndex: int):
     response.say(questions[questionIndex])
     response.record(action=f"/recording/{questionIndex}",
                     questionIndex=questionIndex, finish_on_key="*", method="GET", timeout=10)
-    response.redirect(f"/question/{questionIndex + 1}", method='GET')
+    # response.redirect(f"/question/{questionIndex + 1}", method='GET')
     return Response(content=str(response), media_type="application/xml")
 
 
@@ -168,11 +183,11 @@ async def save_transcribe_into_file(number: str, url: str, index: int):
     # when get third answer, generate 4 follow up questions
     if index == 2:
         text = ""
-        for i in range(0,3):
+        for i in range(0, 3):
             text = text + f"Question {i + 1}: {questions[i]}\n"
             text = text + f"Answer {i + 1}: {answers[i]}\n\n"
         generated_questions = await generate_question(text)
-        for i in range(0,4):
+        for i in range(0, 4):
             questions[i + 6] = generated_questions[i]
         with open(f"./data/{number}_question.json", "w") as f:
             f.write(json.dumps(questions))
@@ -195,7 +210,7 @@ async def recording(request: Request, questionIndex: int):
 # asyncio.run(generate_question("""
 # Question 1: Please tell me who is involved in the story and their ages at the time.
 # Answer 1: The story involves my grandfather, John, who was 70 years old at the time, and myself, who was around 10 years old. We were the main characters of this story.
-                        
+
 # Question 2: Please tell me what the setting of the story is and any descriptions that help set the mood.
 # Answer 2: The setting of the story is in a small, quiet town in the countryside. It's the kind of place where everyone knows everyone, and life moves at a slower pace. The story took place in the summer, so there's a feeling of warmth, freedom, and a sense of adventure in the air. Our house, a charming old cottage, sat at the edge of a large, serene lake, which was the heart of all our summer activities.
 
@@ -207,7 +222,7 @@ async def recording(request: Request, questionIndex: int):
 # asyncio.run(generate_question("""
 # Question 1: Please tell me who is involved in the story and their ages at the time.
 # Answer 1: I don't wanna answer this qustion.
-                        
+
 # Question 2: Please tell me what the setting of the story is and any descriptions that help set the mood.
 # Answer 2: I don't wanna answer this qustion.
 
@@ -216,4 +231,4 @@ async def recording(request: Request, questionIndex: int):
 # """))
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app:app", host="0.0.0.0", port=8030, reload=True)
